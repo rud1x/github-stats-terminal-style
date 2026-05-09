@@ -2,15 +2,20 @@ name: Update Full GitHub Stats
 
 on:
   schedule:
-    - cron: '0 */1 * * *'  # Каждый час
-  workflow_dispatch:         # Можно запустить вручную
+    - cron: '0 */1 * * *'
+  workflow_dispatch:
 
 jobs:
   update-stats:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
     steps:
       - uses: actions/checkout@v4
-      
+        with:
+          fetch-depth: 0
+          
       - name: Get GitHub data
         run: |
           # Получаем базовую статистику
@@ -26,10 +31,61 @@ jobs:
             STARS=$((STARS + REPO_STARS))
           done
           
-          # Получаем последние коммиты (правильно формируем МАССИВ)
+          # ========== АВТОМАТИЧЕСКИЙ ПОДСЧЁТ ЯЗЫКОВ ==========
+          echo "📊 Собираю информацию о языках программирования..."
+          
+          # Получаем список репозиториев
+          REPOS_NAMES=$(curl -s https://api.github.com/users/rud1x/repos?per_page=100 | jq -r '.[].name')
+          
+          # Создаём временный файл для хранения языков
+          declare -A LANG_BYTES
+          TOTAL_BYTES=0
+          
+          for REPO in $REPOS_NAMES; do
+            echo "  Обработка репозитория: $REPO"
+            
+            # Получаем языки для каждого репозитория
+            LANG_DATA=$(curl -s "https://api.github.com/repos/rud1x/$REPO/languages")
+            
+            # Парсим языки и добавляем к общему счётчику
+            while IFS= read -r line; do
+              if [[ -n "$line" ]]; then
+                LANG=$(echo "$line" | cut -d'|' -f1)
+                BYTES=$(echo "$line" | cut -d'|' -f2)
+                LANG_BYTES["$LANG"]=$((${LANG_BYTES["$LANG"]:-0} + BYTES))
+                TOTAL_BYTES=$((TOTAL_BYTES + BYTES))
+              fi
+            done < <(echo "$LANG_DATA" | jq -r 'to_entries[] | "\(.key)|\(.value)"')
+          done
+          
+          # Формируем JSON с языками (топ-5, в процентах)
+          LANGUAGES_JSON="["
+          COUNTER=0
+          
+          # Сортируем по убыванию байтов и берём топ-5
+          for LANG in $(for k in "${!LANG_BYTES[@]}"; do echo "${LANG_BYTES[$k]}|$k"; done | sort -rn | head -5 | cut -d'|' -f2); do
+            BYTES=${LANG_BYTES[$LANG]}
+            PERCENT=$(echo "scale=1; $BYTES * 100 / $TOTAL_BYTES" | bc)
+            
+            if [[ $COUNTER -gt 0 ]]; then
+              LANGUAGES_JSON="$LANGUAGES_JSON,"
+            fi
+            LANGUAGES_JSON="$LANGUAGES_JSON {\"name\": \"$LANG\", \"percent\": $PERCENT}"
+            COUNTER=$((COUNTER + 1))
+          done
+          LANGUAGES_JSON="$LANGUAGES_JSON]"
+          
+          # Если языков не найдено — используем заглушку
+          if [[ "$LANGUAGES_JSON" == "[]" ]]; then
+            LANGUAGES_JSON='[{"name": "Python", "percent": 100}]'
+          fi
+          
+          echo "✅ Найдено языков: $COUNTER"
+          echo "📝 $LANGUAGES_JSON"
+          
+          # Получаем последние коммиты
           EVENTS=$(curl -s https://api.github.com/users/rud1x/events/public)
           
-          # Создаём JSON с коммитами в виде массива
           COMMITS_JSON=$(echo $EVENTS | jq '[.[] | select(.type=="PushEvent")] | .[0:5] | map({
             message: (.payload.commits[0].message // "Commit"),
             repo: .repo.name,
@@ -45,22 +101,27 @@ jobs:
   "gists": 0,
   "pullRequests": 0,
   "issues": 3,
-  "languages": [
-    {"name": "Python", "percent": 65},
-    {"name": "HTML", "percent": 15},
-    {"name": "CSS", "percent": 10},
-    {"name": "JavaScript", "percent": 5},
-    {"name": "JSON", "percent": 5}
-  ],
+  "languages": $LANGUAGES_JSON,
   "lastCommits": $COMMITS_JSON,
   "updatedAt": "$(date -Iseconds)"
 }
 EOF
           
+          echo "✅ cfg.json успешно создан!"
+          cat cfg.json
+          
       - name: Commit and push
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
+          
+          git pull origin master --rebase || true
+          
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          
           git add cfg.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update stats [skip ci]"
-          git push
+          git commit -m "Auto-update stats [skip ci]"
+          git push origin master
