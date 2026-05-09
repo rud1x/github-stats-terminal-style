@@ -1,8 +1,32 @@
 {
-  "repos": 40,
+  "repos": 4,
   "stars": 13,
   "followers": 1,
   "gists": 0,
   "pullRequests": 0,
-  "issues": 3
+  "issues": 3,
+  "languages": [
+    {"name": "Python", "percent": 65},
+    {"name": "HTML", "percent": 15},
+    {"name": "CSS", "percent": 10},
+    {"name": "JavaScript", "percent": 5},
+    {"name": "JSON", "percent": 5}
+  ],
+  "lastCommits": [
+    {
+      "message": "Update: добавил новую функцию",
+      "repo": "rud1x/HuroBot_tg",
+      "date": "2026-05-08T14:30:00Z"
+    },
+    {
+      "message": "Fix: исправлен баг с авторизацией",
+      "repo": "rud1x/NeoShell",
+      "date": "2026-05-07T10:15:00Z"
+    },
+    {
+      "message": "Initial commit",
+      "repo": "rud1x/github-stats-terminal-style",
+      "date": "2026-05-06T20:00:00Z"
+    }
+  ]
 }
