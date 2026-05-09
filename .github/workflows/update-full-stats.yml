@@ -1,0 +1,62 @@
+name: Update Full GitHub Stats
+
+on:
+  schedule:
+    - cron: '0 */1 * * *'  # Каждые 6 часов
+  workflow_dispatch:         # Можно запустить вручную
+
+jobs:
+  update-stats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Get GitHub data
+        run: |
+          # Получаем базовую статистику
+          PROFILE=$(curl -s https://api.github.com/users/rud1x)
+          REPOS=$(echo $PROFILE | jq '.public_repos')
+          FOLLOWERS=$(echo $PROFILE | jq '.followers')
+          
+          # Считаем звёзды (упрощённо, без токена)
+          STARS=0
+          REPOS_LIST=$(curl -s https://api.github.com/users/rud1x/repos?per_page=100)
+          for repo in $(echo $REPOS_LIST | jq -r '.[].name'); do
+            REPO_STARS=$(curl -s https://api.github.com/repos/rud1x/$repo | jq '.stargazers_count')
+            STARS=$((STARS + REPO_STARS))
+          done
+          
+          # Получаем последние коммиты
+          EVENTS=$(curl -s https://api.github.com/users/rud1x/events/public)
+          COMMITS=$(echo $EVENTS | jq '[.[] | select(.type=="PushEvent")] | .[0:3] | .[] | {
+            message: .payload.commits[0].message,
+            repo: .repo.name,
+            date: .created_at
+          }')
+          
+          # Создаём полный JSON
+          echo '{
+            "repos": '$REPOS',
+            "stars": '$STARS',
+            "followers": '$FOLLOWERS',
+            "gists": 0,
+            "pullRequests": 0,
+            "issues": 3,
+            "languages": [
+              {"name": "Python", "percent": 65},
+              {"name": "HTML", "percent": 15},
+              {"name": "CSS", "percent": 10},
+              {"name": "JavaScript", "percent": 5},
+              {"name": "JSON", "percent": 5}
+            ],
+            "lastCommits": '$COMMITS',
+            "updatedAt": "'$(date -Iseconds)'"
+          }' > cfg.json
+          
+      - name: Commit and push
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add cfg.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update stats [skip ci]"
+          git push
